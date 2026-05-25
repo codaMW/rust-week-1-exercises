@@ -1,4 +1,216 @@
-use rust_week_1_exercises::extract_tx_version;
+use rust_week_1_exercises::{
+    add_utxo, calculate_sats, calculate_total_reward, create_utxo, extract_tx_version,
+    find_high_fee, find_utxo_with_min_value, generate_address, get_tx_status, get_wallet_details,
+    halving_schedule, is_in_range, is_large_balance, is_mainnet, is_same_wallet, is_valid_tx_fee,
+    normalize_address, tx_priority, unpack_wallet_info, validate_block_height, Utxo, BTC_TO_SATS,
+    MINING_REWARD,
+};
+use std::collections::HashMap;
+
+#[cfg(test)]
+mod exercise_tests {
+    use super::*;
+
+    #[test]
+    fn test_constants_set() {
+        assert!(
+            MINING_REWARD > 0.0,
+            "MINING_REWARD must be set to a positive value"
+        );
+        assert_eq!(BTC_TO_SATS, 100_000_000);
+    }
+
+    #[test]
+    fn test_calculate_total_reward() {
+        assert_eq!(calculate_total_reward(4), 4.0 * MINING_REWARD);
+        assert_eq!(calculate_total_reward(0), 0.0);
+    }
+
+    #[test]
+    fn test_is_valid_tx_fee() {
+        assert!(is_valid_tx_fee(0.0001));
+        assert!(is_valid_tx_fee(0.00001));
+        assert!(is_valid_tx_fee(0.01));
+        assert!(!is_valid_tx_fee(0.0));
+        assert!(!is_valid_tx_fee(0.02));
+    }
+
+    #[test]
+    fn test_is_large_balance() {
+        assert!(is_large_balance(75.0));
+        assert!(!is_large_balance(25.0));
+        assert!(!is_large_balance(50.0));
+    }
+
+    #[test]
+    fn test_tx_priority() {
+        assert_eq!(tx_priority(1000, 0.1), "high");
+        assert_eq!(tx_priority(1000, 0.025), "medium");
+        assert_eq!(tx_priority(1000, 0.005), "low");
+    }
+
+    #[test]
+    fn test_is_mainnet() {
+        assert!(is_mainnet("mainnet"));
+        assert!(is_mainnet("MainNet"));
+        assert!(is_mainnet("MAINNET"));
+        assert!(!is_mainnet("testnet"));
+        assert!(!is_mainnet("signet"));
+    }
+
+    #[test]
+    fn test_is_in_range() {
+        assert!(is_in_range(150));
+        assert!(is_in_range(100));
+        assert!(is_in_range(200));
+        assert!(!is_in_range(99));
+        assert!(!is_in_range(201));
+    }
+
+    #[test]
+    fn test_is_same_wallet() {
+        let wallet = String::from("satoshi");
+        let other = String::from("satoshi");
+        assert!(is_same_wallet(&wallet, &wallet));
+        assert!(!is_same_wallet(&wallet, &other));
+    }
+
+    #[test]
+    fn test_normalize_address() {
+        assert_eq!(normalize_address("  BC1qXYZ  "), "bc1qxyz");
+        assert_eq!(normalize_address("ABCDEF"), "abcdef");
+    }
+
+    #[test]
+    fn test_add_utxo() {
+        let utxos = vec![Utxo {
+            txid: "aaa".into(),
+            vout: 0,
+            value: 100,
+        }];
+        let new = Utxo {
+            txid: "bbb".into(),
+            vout: 1,
+            value: 200,
+        };
+        let result = add_utxo(utxos, new.clone());
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[1], new);
+    }
+
+    #[test]
+    fn test_find_high_fee() {
+        assert_eq!(find_high_fee(&[0.001, 0.002, 0.01]), Some((2, 0.01)));
+        assert_eq!(find_high_fee(&[0.001, 0.002]), None);
+        assert_eq!(find_high_fee(&[]), None);
+    }
+
+    #[test]
+    fn test_get_wallet_details() {
+        let (name, balance) = get_wallet_details();
+        assert_eq!(name, "satoshi_wallet");
+        assert_eq!(balance, 50.0);
+    }
+
+    #[test]
+    fn test_get_tx_status() {
+        let mut pool = HashMap::new();
+        pool.insert("tx1".to_string(), "confirmed".to_string());
+        assert_eq!(get_tx_status(&pool, "tx1"), "confirmed");
+        assert_eq!(get_tx_status(&pool, "missing"), "not found");
+    }
+
+    #[test]
+    fn test_unpack_wallet_info() {
+        let info = ("satoshi_wallet".to_string(), 50.0);
+        assert_eq!(
+            unpack_wallet_info(info),
+            "Wallet satoshi_wallet has balance: 50 BTC"
+        );
+    }
+
+    #[test]
+    fn test_calculate_sats() {
+        assert_eq!(calculate_sats(1.0), 100_000_000);
+        assert_eq!(calculate_sats(0.5), 50_000_000);
+        assert_eq!(calculate_sats(0.0), 0);
+    }
+
+    #[test]
+    fn test_generate_address() {
+        let addr = generate_address("bc1q");
+        assert_eq!(addr.len(), 32);
+        assert!(addr.starts_with("bc1q"));
+        assert!(addr
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()));
+    }
+
+    #[test]
+    fn test_validate_block_height_negative() {
+        let (ok, msg) = validate_block_height(-1);
+        assert!(!ok);
+        assert!(msg.to_lowercase().contains("negative"));
+    }
+
+    #[test]
+    fn test_validate_block_height_too_large() {
+        let (ok, msg) = validate_block_height(900_000);
+        assert!(!ok);
+        assert!(msg.to_lowercase().contains("unrealistic"));
+    }
+
+    #[test]
+    fn test_validate_block_height_valid() {
+        let (ok, _) = validate_block_height(700_000);
+        assert!(ok);
+    }
+
+    #[test]
+    fn test_halving_schedule() {
+        let result = halving_schedule(&[0, 210_000, 420_000, 630_000]);
+        assert_eq!(result.get(&0), Some(&5_000_000_000));
+        assert_eq!(result.get(&210_000), Some(&2_500_000_000));
+        assert_eq!(result.get(&420_000), Some(&1_250_000_000));
+        assert_eq!(result.get(&630_000), Some(&625_000_000));
+    }
+
+    #[test]
+    fn test_find_utxo_with_min_value() {
+        let utxos = vec![
+            Utxo {
+                txid: "a".into(),
+                vout: 0,
+                value: 100,
+            },
+            Utxo {
+                txid: "b".into(),
+                vout: 0,
+                value: 500,
+            },
+            Utxo {
+                txid: "c".into(),
+                vout: 0,
+                value: 250,
+            },
+        ];
+        let picked = find_utxo_with_min_value(&utxos, 200).unwrap();
+        assert_eq!(picked.value, 250);
+        assert_eq!(find_utxo_with_min_value(&utxos, 1000), None);
+    }
+
+    #[test]
+    fn test_create_utxo() {
+        let mut extra = HashMap::new();
+        extra.insert("value".to_string(), "1000".to_string());
+        extra.insert("script".to_string(), "OP_DUP".to_string());
+        let result = create_utxo("abc123", 5, extra);
+        assert_eq!(result.get("txid"), Some(&"abc123".to_string()));
+        assert_eq!(result.get("vout"), Some(&"5".to_string()));
+        assert_eq!(result.get("value"), Some(&"1000".to_string()));
+        assert_eq!(result.get("script"), Some(&"OP_DUP".to_string()));
+    }
+}
 
 #[cfg(test)]
 mod tests {
